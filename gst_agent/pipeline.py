@@ -36,6 +36,30 @@ def _category_dir(category: str) -> Path:
     return settings.downloads_dir / category
 
 
+def to_relative_download_path(path: Path) -> str:
+    """documents.local_path is stored relative to settings.downloads_dir, not
+    as an absolute path -- an absolute path baked in by one environment
+    (e.g. a native Windows run) is meaningless read back from another (e.g.
+    the Docker image, or downloads_dir simply moving) even though the
+    underlying data/ folder is the same. Storing a relative path keeps the
+    database portable across however this project is run.
+
+    Stored with forward slashes (.as_posix()) specifically, not str(), which
+    would use the writer's native separator -- a path written with Windows
+    backslashes is not a path at all to a POSIX Path (backslash isn't a
+    separator there), so a native Windows run's rows must still resolve
+    correctly when later read inside the Linux Docker image."""
+    return path.relative_to(settings.downloads_dir).as_posix()
+
+
+def to_absolute_download_path(value: str) -> Path:
+    """Inverse of to_relative_download_path -- also accepts an absolute path
+    unchanged, so rows written before this change (already absolute) keep
+    resolving correctly without a data migration."""
+    path = Path(value)
+    return path if path.is_absolute() else settings.downloads_dir / path
+
+
 def _safe_filename(doc_url: str, doc_id: int) -> str:
     name = doc_url.rsplit("/", 1)[-1] or f"document-{doc_id}.pdf"
     name = "".join(c for c in name if c not in '\\/:*?"<>|')
@@ -95,7 +119,9 @@ def _download(conn: sqlite3.Connection, doc_id: int, doc_url: str) -> Path | Non
     staging_dir.mkdir(parents=True, exist_ok=True)
     local_path = staging_dir / _safe_filename(doc_url, doc_id)
     local_path.write_bytes(content)
-    db.mark_downloaded(conn, doc_id, local_path=str(local_path), file_hash=file_hash)
+    db.mark_downloaded(
+        conn, doc_id, local_path=to_relative_download_path(local_path), file_hash=file_hash
+    )
     return local_path
 
 
@@ -104,7 +130,7 @@ def _process_document(
 ) -> None:
     """Extract, classify, and file a single already-downloaded document."""
     doc_id = row["id"]
-    local_path = Path(row["local_path"])
+    local_path = to_absolute_download_path(row["local_path"])
 
     try:
         extraction = extract_text(local_path)
@@ -145,7 +171,7 @@ def _process_document(
         dest_path = dest_dir / local_path.name
         if local_path != dest_path:
             shutil.move(str(local_path), str(dest_path))
-        db.mark_done(conn, doc_id, local_path=str(dest_path))
+        db.mark_done(conn, doc_id, local_path=to_relative_download_path(dest_path))
     except OSError as exc:
         logger.warning("Filing failed for document %s: %s", doc_id, exc)
         db.record_failure(conn, doc_id, stage="file", reason=str(exc))
@@ -171,13 +197,15 @@ def _promote_recurring_categories(conn: sqlite3.Connection) -> None:
         dest_dir = _category_dir(name)
         dest_dir.mkdir(parents=True, exist_ok=True)
         for doc_row in db.get_documents_with_proposed_category(conn, name):
-            old_path = Path(doc_row["local_path"]) if doc_row["local_path"] else None
+            old_path = to_absolute_download_path(doc_row["local_path"]) if doc_row["local_path"] else None
             if old_path is None or not old_path.exists():
                 continue
             new_path = dest_dir / old_path.name
             try:
                 shutil.move(str(old_path), str(new_path))
-                db.reclassify_document(conn, doc_row["id"], category=name, local_path=str(new_path))
+                db.reclassify_document(
+                    conn, doc_row["id"], category=name, local_path=to_relative_download_path(new_path)
+                )
             except OSError as exc:
                 logger.warning(
                     "Could not move document %s while promoting %r: %s", doc_row["id"], name, exc

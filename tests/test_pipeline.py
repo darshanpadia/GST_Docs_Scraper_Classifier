@@ -6,6 +6,7 @@ test_classifier.py, test_llm_client.py)."""
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -68,6 +69,26 @@ def test_settings(tmp_path):
     return dataclasses.replace(real_settings, downloads_dir=tmp_path / "downloads", max_new_docs_per_run=2)
 
 
+def test_relative_download_path_round_trip(test_settings):
+    with patch("gst_agent.pipeline.settings", test_settings):
+        absolute = test_settings.downloads_dir / "Circular" / "1_sample.pdf"
+        relative = pipeline.to_relative_download_path(absolute)
+        # Always forward slashes (.as_posix()), regardless of the writer's
+        # OS -- a backslash-separated value wouldn't resolve when later read
+        # by a POSIX Path (e.g. inside the Docker image).
+        assert relative == "Circular/1_sample.pdf"
+        assert pipeline.to_absolute_download_path(relative) == absolute
+
+
+def test_to_absolute_download_path_still_accepts_legacy_absolute_values(test_settings):
+    # Rows written before this project stored local_path relative to
+    # downloads_dir -- those already-absolute values must keep resolving
+    # correctly without a data migration.
+    with patch("gst_agent.pipeline.settings", test_settings):
+        legacy_absolute = str(test_settings.downloads_dir / "Circular" / "1_sample.pdf")
+        assert pipeline.to_absolute_download_path(legacy_absolute) == Path(legacy_absolute)
+
+
 def test_run_once_downloads_extracts_classifies_and_files(conn, test_settings):
     docs = [_doc("https://example.com/a.pdf", category_hint="Circular")]
     with patch("gst_agent.pipeline.settings", test_settings), \
@@ -82,6 +103,15 @@ def test_run_once_downloads_extracts_classifies_and_files(conn, test_settings):
     assert stats["by_category"]["Circular"] == 1
     filed = list((test_settings.downloads_dir / "Circular").glob("*.pdf"))
     assert len(filed) == 1
+
+    # local_path must be stored RELATIVE to downloads_dir, not as an absolute
+    # path -- an absolute path baked in by one environment (e.g. a native
+    # Windows run) is meaningless read back from another (e.g. the Docker
+    # image mounting the same data/ folder). See pipeline.to_relative_download_path.
+    row = conn.execute("SELECT local_path FROM documents").fetchone()
+    stored_path = Path(row["local_path"])
+    assert not stored_path.is_absolute()
+    assert stored_path == Path("Circular") / filed[0].name
 
 
 def test_run_once_stops_at_max_new_docs_per_run(conn, test_settings):

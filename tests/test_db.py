@@ -159,3 +159,46 @@ def test_category_promotion_flow(tmp_path: Path):
         db.reclassify_document(conn, doc_ids[0], category="Advisory", local_path="/tmp/moved.pdf")
         moved = db.get_documents_with_proposed_category(conn, "Advisory")
         assert doc_ids[0] not in {row["id"] for row in moved}  # now category == "Advisory", filtered out
+
+
+def test_get_recent_runs_orders_newest_first_and_respects_limit(conn):
+    run_ids = [db.start_run(conn) for _ in range(5)]
+    for run_id in run_ids:
+        db.finish_run(conn, run_id, new_documents_downloaded=0)
+
+    recent = db.get_recent_runs(conn, limit=3)
+    assert [r["id"] for r in recent] == list(reversed(run_ids))[:3]
+
+
+def test_get_document_returns_row_or_none(conn):
+    run_id = db.start_run(conn)
+    doc_id = _insert_sample(conn, run_id)
+
+    assert db.get_document(conn, doc_id)["doc_url"] == "https://cbic-gst.gov.in/pdf/sample.pdf"
+    assert db.get_document(conn, 999999) is None
+
+
+def test_get_documents_filters_by_category_and_status_with_pagination(conn):
+    run_id = db.start_run(conn)
+    for i in range(3):
+        doc_id = _insert_sample(conn, run_id, url=f"https://cbic-gst.gov.in/pdf/c{i}.pdf")
+        db.mark_downloaded(conn, doc_id, local_path=f"/tmp/c{i}.pdf", file_hash=f"h{i}")
+        db.mark_classified(conn, doc_id, category="Circular")
+        db.mark_done(conn, doc_id, local_path=f"/tmp/c{i}.pdf")
+    other_id = _insert_sample(conn, run_id, url="https://cbic-gst.gov.in/pdf/order.pdf")
+    db.record_failure(conn, other_id, stage="download", reason="x")
+
+    circulars, total = db.get_documents(conn, category="Circular", limit=50, offset=0)
+    assert total == 3
+    assert len(circulars) == 3
+
+    failed, failed_total = db.get_documents(conn, status="failed", limit=50, offset=0)
+    assert failed_total == 1
+    assert failed[0]["id"] == other_id
+
+    page1, total_all = db.get_documents(conn, limit=2, offset=0)
+    page2, _ = db.get_documents(conn, limit=2, offset=2)
+    assert total_all == 4
+    assert len(page1) == 2
+    assert len(page2) == 2
+    assert {r["id"] for r in page1}.isdisjoint({r["id"] for r in page2})

@@ -6,6 +6,51 @@ sources, once a day, with a hard cap of 100 new documents per run.
 
 ## Quick start
 
+Three ways to run this, in increasing order of setup effort:
+
+**1. Docker (fewest moving parts — Python and Tesseract OCR both come
+pre-installed in the image):**
+
+```bash
+docker build -t gst-law-docs-agent .
+docker run --rm -v "$(pwd)/data:/app/data" gst-law-docs-agent                        # default: one pass (--once)
+docker run --rm -v "$(pwd)/data:/app/data" gst-law-docs-agent gst_agent.main --stats
+docker run --rm -p 5000:5000 -v "$(pwd)/data:/app/data" gst-law-docs-agent gst_agent.web  # web UI at http://127.0.0.1:5000
+```
+The `-v` mount is what makes results/state/logs land in `./data` on your
+host and survive between runs — without it, everything is lost when the
+container exits.
+
+**Windows path gotcha (verified the hard way):** if you're running these
+from Git Bash, `$(pwd)` gets silently mangled by MSYS's path conversion for
+any path containing a space (very likely here, e.g. `...\SHVM\...`), and
+Docker ends up mounting an empty directory with no error — `--stats` will
+report 0 documents even though your real data is untouched on disk. Fix:
+either run from **PowerShell** (`-v "${PWD}\data:C:/app/data"` isn't
+needed — just `-v "${PWD}\data:/app/data"` works correctly there), or from
+Git Bash prefix the command with `MSYS_NO_PATHCONV=1` and use an explicit
+path:
+```bash
+MSYS_NO_PATHCONV=1 docker run --rm -v "D:/path/to/project/data:/app/data" gst-law-docs-agent gst_agent.main --stats
+```
+
+**2. One-shot setup script (native venv, no Docker):**
+
+```bash
+./setup.sh          # macOS/Linux/WSL
+.\setup.ps1          # Windows PowerShell
+```
+This creates `.venv`, installs the project, and gives you a short `gst-agent`
+command:
+```bash
+gst-agent --once          # run one pass now
+gst-agent --stats         # see current state
+```
+(OCR still needs Tesseract installed separately on this path — see "OCR
+setup" below. Docker avoids that step entirely.)
+
+**3. Manual venv (full control, no new files):**
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate          # Windows
@@ -16,11 +61,43 @@ python -m gst_agent.main --once          # run one pass now
 python -m gst_agent.main --stats         # see current state
 ```
 
-Results land in `data/downloads/<Category>/`, state lives in
-`data/state.db` (SQLite), logs in `data/logs/gst_agent.log`.
+All three produce the same result: downloads in
+`data/downloads/<Category>/`, state in `data/state.db` (SQLite), logs in
+`data/logs/gst_agent.log`.
 
 Copy `.env.example` to `.env` to change any default (all settings have
-sensible built-in defaults, so this is optional).
+sensible built-in defaults, so this is optional; not used by the Docker
+path unless you also pass `--env-file .env` to `docker run`).
+
+## Web UI
+
+A small local dashboard for operating and inspecting the agent visually,
+instead of via the CLI — useful for a reviewer to click through rather than
+type commands. It's a thin layer over the same `gst_agent.db`/`gst_agent.pipeline`
+the CLI uses; it changes no behavior, it only calls the same functions
+`--once` and `--retry-failed` already call.
+
+```bash
+gst-agent-ui                              # after setup.sh/setup.ps1, or:
+python -m gst_agent.web                   # after the manual venv path
+# Docker: docker run -p 5000:5000 -v "$(pwd)/data:/app/data" gst-law-docs-agent gst_agent.web
+```
+Then open **http://127.0.0.1:5000**.
+
+- **Dashboard** — live counts (total/done/pending/failed), a breakdown by
+  category, a "Run now" button (triggers a real pass — confirmed before
+  running, since it contacts real government sites), a "Retry failed"
+  button, recent run history, and full detail on any failed documents.
+- **Documents** — every discovered document, filterable by category and
+  status, with a link to the original source URL and an "Open PDF" link
+  that serves the actual downloaded file straight from disk.
+- **Logs** — tails `data/logs/gst_agent.log` so you can see exactly what
+  happened during the last run without leaving the browser.
+
+Binds to `127.0.0.1` only and has no authentication — it's a local operator
+console for whoever is at the machine, not a service meant to be exposed to
+a network. No JS framework, no CSS framework: server-rendered HTML with one
+small hand-written stylesheet, kept intentionally simple.
 
 ## What it does
 
@@ -56,6 +133,9 @@ gst_agent/
   llm_client.py   Thin Anthropic API wrapper (only imported if the fallback is enabled)
   pipeline.py     Orchestrates discover -> download -> extract -> classify -> file
   main.py         CLI entrypoint
+  web.py          Web UI (Flask) -- thin visual layer over db.py/pipeline.py, see "Web UI"
+  templates/      Server-rendered HTML for the web UI (Jinja2, no JS framework)
+  static/         One hand-written stylesheet
   sources/
     base.py           DocumentSource interface
     cbic.py            cbic-gst.gov.in
@@ -65,6 +145,12 @@ gst_agent/
 
 Adding a new official source later means writing one class in `sources/`
 and registering it in `sources/__init__.py` — nothing else changes.
+
+Packaging/deployment files at the project root: `pyproject.toml` (gives the
+`gst-agent` console command), `setup.sh`/`setup.ps1` (one-shot native
+install), `Dockerfile`/`.dockerignore` (containerized run with Tesseract
+pre-installed). None of them affect `gst_agent/`'s code — all three ways of
+running the project in "Quick start" execute the exact same pipeline.
 
 ### Data flow per document
 
@@ -182,10 +268,17 @@ so relative paths resolve correctly.
 0 3 * * * cd /path/to/project && .venv/bin/python -m gst_agent.main --once >> data/logs/cron.log 2>&1
 ```
 
+**Linux/macOS (cron, Docker instead of a venv):**
+
+```
+0 3 * * * docker run --rm -v /path/to/project/data:/app/data gst-law-docs-agent --once >> /path/to/project/data/logs/cron.log 2>&1
+```
+
 **Manual / demo convenience (any OS, no scheduler setup):**
 
 ```bash
 python -m gst_agent.main --loop --interval-hours 24
+# or, if built: docker run -v "$(pwd)/data:/app/data" gst-law-docs-agent --loop --interval-hours 24
 ```
 
 ## Recovering from failures
@@ -228,10 +321,11 @@ Unit tests cover the DB layer (dedup, lifecycle, restart-safety, category
 promotion, schema migration), each source's HTML parsing (against real
 page structure captured from the live sites), the extractor (real
 minimal PDFs, OCR path mocked), the classifier (rule-based patterns + LLM
-fallback with a mocked client), and the pipeline (discovery, the 100-doc
+fallback with a mocked client), the pipeline (discovery, the 100-doc
 cap, cross-run backlog resumption, per-document failure isolation, category
-promotion) — all against mocked network/LLM calls, so the suite runs
-offline and fast.
+promotion), and the web UI (every route, via Flask's test client — dashboard
+rendering, filtering, real PDF byte-serving, failure flash messages) — all
+against mocked network/LLM calls, so the suite runs offline and fast.
 
 `scripts_dry_run_discovery.py` is a manual, non-pytest smoke test that runs
 real discovery (no downloads) against the live sites and prints a summary —

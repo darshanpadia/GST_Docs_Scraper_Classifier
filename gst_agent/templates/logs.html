@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Logs -- GST Law Document Agent{% endblock %}
+{% block content %}
+  <div class="page-header">
+    <h1>Logs</h1>
+    <div class="actions">
+      <a class="btn btn-secondary" href="{{ url_for('logs', lines=lines_count) }}">Refresh</a>
+    </div>
+  </div>
+  <p class="result-count">Last {{ lines_count }} line(s) of data/logs/gst_agent.log</p>
+  {% if lines %}
+  <pre class="log-view">{% for line in lines %}{{ line }}
+{% endfor %}</pre>
+  {% else %}
+  <p class="empty">No log entries yet.</p>
+  {% endif %}
+{% endblock %}

@@ -394,3 +394,47 @@ def get_pending_documents(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         "SELECT * FROM documents WHERE status = ? ORDER BY discovered_at ASC",
         (STATUS_DISCOVERED,),
     ).fetchall()
+
+
+# --- reporting for the web UI ---------------------------------------------
+
+
+def get_recent_runs(conn: sqlite3.Connection, *, limit: int = 10) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM runs ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+
+
+def get_document(conn: sqlite3.Connection, doc_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM documents WHERE id = ?", (doc_id,)).fetchone()
+
+
+def get_documents(
+    conn: sqlite3.Connection,
+    *,
+    category: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[sqlite3.Row], int]:
+    """Filtered, paginated document listing for the web UI's browser page.
+    Returns (rows, total_matching_count) so the caller can render pagination
+    controls without a second round-trip."""
+    where = []
+    params: list = []
+    if category:
+        where.append("category = ?")
+        params.append(category)
+    if status:
+        where.append("status = ?")
+        params.append(status)
+    clause = f"WHERE {' AND '.join(where)}" if where else ""
+
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM documents {clause}", params
+    ).fetchone()[0]
+    rows = conn.execute(
+        f"SELECT * FROM documents {clause} ORDER BY discovered_at DESC LIMIT ? OFFSET ?",
+        [*params, limit, offset],
+    ).fetchall()
+    return rows, total

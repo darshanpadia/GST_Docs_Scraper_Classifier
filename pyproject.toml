@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gst-law-docs-agent"
+version = "1.0.0"
+description = "Automated GST Law Document Collection & Classification Agent"
+requires-python = ">=3.10"
+# Kept in sync with requirements.txt by hand -- requirements.txt is what the
+# Dockerfile installs (so its layer caches independently of code changes);
+# this list is what `pip install -e .` uses for a native/venv install.
+dependencies = [
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "PyMuPDF>=1.24",
+    "pytesseract>=0.3.10",
+    "Pillow>=10.0",
+    "python-dotenv>=1.0",
+    "Flask>=3.0",
+]
+
+[project.optional-dependencies]
+llm = ["anthropic>=0.40"]
+dev = ["pytest>=8.0"]
+
+# After `pip install -e .`, this gives a `gst-agent` command instead of
+# needing to remember `python -m gst_agent.main`.
+[project.scripts]
+gst-agent = "gst_agent.main:main"
+gst-agent-ui = "gst_agent.web:main"
+
+[tool.setuptools.packages.find]
+include = ["gst_agent*"]
+
+[tool.setuptools.package-data]
+gst_agent = ["templates/*.html", "static/*.css"]
