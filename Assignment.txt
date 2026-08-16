@@ -1,0 +1,8 @@
+Build Ai agent in python 
+
+Run every 24 hours
+Download all document related to GST law
+Scan these documents with OCR library 
+And categorize them in to separate folders, based on content / document type , e.g Act, Notification, Circulars, 
+
+Stop after you downloaded 100 documents

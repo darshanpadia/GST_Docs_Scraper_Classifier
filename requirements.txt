@@ -1,0 +1,13 @@
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+PyMuPDF>=1.24
+pytesseract>=0.3.10
+Pillow>=10.0
+python-dotenv>=1.0
+
+# Only required if ENABLE_LLM_FALLBACK=true (see .env.example).
+anthropic>=0.40
+
+# dev / test
+pytest>=8.0
