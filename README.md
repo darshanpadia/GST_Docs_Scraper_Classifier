@@ -331,6 +331,18 @@ which Task Scheduler does not set by default. `run_scheduled.ps1` does
 `Set-Location` to its own folder before running, so this isn't something
 you need to get right by hand either.
 
+**Works with either "Quick start" setup path, automatically.**
+`run_scheduled.ps1` checks whether a native `.venv` exists (from
+`setup.ps1`/`setup.sh` or a manual venv) and uses it directly if so;
+otherwise it falls back to running the Docker image instead (which must
+already be built once — `docker build -t gst-law-docs-agent .`). This
+matters because a **Docker-only setup has no `.venv` on the host at all**
+— without this fallback, a scheduled task on a Docker-only install would
+silently fail every time it fired, since `.venv\Scripts\python.exe`
+wouldn't exist. Verified both branches directly: the venv path (a real
+scheduled-style run against the live project) and the Docker fallback
+command (run standalone) each independently confirmed working.
+
 Output is appended to `data/logs/cron.log` (in addition to the app's own
 structured `data/logs/gst_agent.log`). Verify it's registered with
 `Get-ScheduledTask -TaskName "GST Law Document Agent" | Select-Object State`,
