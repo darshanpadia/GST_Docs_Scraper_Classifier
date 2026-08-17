@@ -4,96 +4,143 @@ An automated agent that discovers, downloads, extracts, classifies, and
 files publicly available Indian GST law documents from official government
 sources, once a day, with a hard cap of 100 new documents per run.
 
-## For reviewers: how to run this, easiest first
+## Getting started (for reviewers): clone to running, every shell
 
 You don't need any API key to see the core system work — document
 discovery, downloading, OCR, and classification are all rule-based and
 free by default. An LLM fallback exists for the classifier but is optional
 and off unless explicitly enabled (see "LLM fallback specifically" below).
 
-Pick **one** path based on what you have available, roughly easiest first:
+Commands below are given for **PowerShell**, **Command Prompt (cmd.exe)**,
+and **bash** (Git Bash on Windows, or native on macOS/Linux) — pick
+whichever matches the terminal you're actually using. Every path/quoting
+variant shown has been run for real, not assumed (this project hit real
+shell-specific bugs during development — see the Windows path gotcha
+below — so nothing here is copy-pasted without verification).
 
-1. **Have Docker?** → Section "Quick start," option 1. One `docker build`,
-   then one `docker run`. Python, Tesseract OCR, and every dependency are
-   already inside the image — nothing else to install.
-2. **Have Python 3.10+ but not Docker?** → Section "Quick start," option 2
-   (`setup.sh`/`setup.ps1`). One script creates a virtual environment and
-   installs everything; OCR needs a separate one-time Tesseract install
-   (see "OCR setup") if you want to test scanned-PDF handling specifically
-   — the agent runs fine without it either way (OCR failures degrade
-   gracefully, they don't crash anything).
-3. **Want full manual control, or the above doesn't fit your setup?** →
-   Section "Quick start," option 3 (plain `venv` + `pip install`).
+### Prerequisites
 
-Whichever you pick, then go to **"Testing guide"** below for a numbered
-walkthrough of every way to verify it's actually working — starting with
-the automated test suite (no network, seconds to run) before anything that
-touches real government sites.
+- **Git** (to clone).
+- Either **Docker Desktop** (Path A below — nothing else needed, easiest),
+  **or** **Python 3.10+** (Paths B/C — native install).
 
-## Quick start
+### Step 1 — Clone the repository
 
-Three ways to run this, in increasing order of setup effort:
+Identical in all three shells:
+```
+git clone https://github.com/darshanpadia/GST_Docs_Scraper_Classifier.git
+cd GST_Docs_Scraper_Classifier
+```
+Everything from here on assumes your terminal's current directory is this
+folder (the one containing `Dockerfile`, `requirements.txt`, `gst_agent/`).
 
-**1. Docker (fewest moving parts — Python and Tesseract OCR both come
-pre-installed in the image):**
+### Step 2 — Choose ONE setup path, easiest first
 
+#### Path A — Docker (fewest moving parts: Python + Tesseract OCR are already inside the image)
+
+**PowerShell:**
+```powershell
+docker build -t gst-law-docs-agent .
+docker run --rm -v "${PWD}\data:/app/data" gst-law-docs-agent gst_agent.main --stats
+```
+**Command Prompt (cmd.exe):**
+```cmd
+docker build -t gst-law-docs-agent .
+docker run --rm -v "%cd%\data:/app/data" gst-law-docs-agent gst_agent.main --stats
+```
+**Bash (macOS/Linux, or Git Bash on Windows):**
 ```bash
 docker build -t gst-law-docs-agent .
-docker run --rm -v "$(pwd)/data:/app/data" gst-law-docs-agent                        # default: one pass (--once)
 docker run --rm -v "$(pwd)/data:/app/data" gst-law-docs-agent gst_agent.main --stats
-docker run --rm -p 5000:5000 -v "$(pwd)/data:/app/data" gst-law-docs-agent gst_agent.web  # web UI at http://127.0.0.1:5000
 ```
-The `-v` mount is what makes results/state/logs land in `./data` on your
-host and survive between runs — without it, everything is lost when the
-container exits.
 
-**Windows path gotcha (verified the hard way):** if you're running these
-from Git Bash, `$(pwd)` gets silently mangled by MSYS's path conversion for
-any path containing a space (very likely here, e.g. `...\SHVM\...`), and
-Docker ends up mounting an empty directory with no error — `--stats` will
-report 0 documents even though your real data is untouched on disk. Fix:
-either run from **PowerShell** (`-v "${PWD}\data:C:/app/data"` isn't
-needed — just `-v "${PWD}\data:/app/data"` works correctly there), or from
-Git Bash prefix the command with `MSYS_NO_PATHCONV=1` and use an explicit
-path:
+**Windows + Git Bash path gotcha (hit this for real during development):**
+`$(pwd)` gets silently mangled by Git Bash's MSYS path conversion for any
+path containing a space (likely here) — Docker then mounts an *empty*
+directory with no error, and `--stats` reports 0 documents even though
+your real data is untouched on disk. Fix: use PowerShell or cmd.exe
+instead (both verified working above), or from Git Bash prefix the
+command and use an explicit path:
 ```bash
 MSYS_NO_PATHCONV=1 docker run --rm -v "D:/path/to/project/data:/app/data" gst-law-docs-agent gst_agent.main --stats
 ```
 
-**2. One-shot setup script (native venv, no Docker):**
+A fresh clone should show `"total_documents": 0`. From here, in any
+shell: `docker run --rm -v "<same -v as above>" gst-law-docs-agent` runs a
+real pass (default `--once`); add `gst_agent.web` instead of
+`gst_agent.main --stats` for the web UI (see "Web UI" below).
 
-```bash
-./setup.sh          # macOS/Linux/WSL
-.\setup.ps1          # Windows PowerShell
+#### Path B — One-shot setup script (native venv, no Docker)
+
+**PowerShell:**
+```powershell
+.\setup.ps1
+gst-agent --stats
 ```
-This creates `.venv`, installs the project, and gives you a short `gst-agent`
-command:
-```bash
-gst-agent --once          # run one pass now
-gst-agent --stats         # see current state
+**Command Prompt (cmd.exe)** — `.ps1` scripts don't run directly in cmd,
+so invoke it through PowerShell, then drop back to cmd for the rest:
+```cmd
+powershell -ExecutionPolicy Bypass -File setup.ps1
+.venv\Scripts\activate.bat
+gst-agent --stats
 ```
-(OCR still needs Tesseract installed separately on this path — see "OCR
-setup" below. Docker avoids that step entirely.)
+**Bash (macOS/Linux/WSL/Git Bash):**
+```bash
+./setup.sh
+source .venv/bin/activate     # macOS/Linux/WSL
+source .venv/Scripts/activate # Git Bash on Windows
+gst-agent --stats
+```
+This creates `.venv` and installs everything (including the LLM extras).
+OCR needs a separate one-time Tesseract install on this path — see "OCR
+setup" below; the agent runs fine without it regardless (OCR failures
+degrade gracefully, they don't crash anything). Docker (Path A) avoids
+that step entirely.
 
-**3. Manual venv (full control, no new files):**
+#### Path C — Manual venv (full control, no new files run)
 
+**PowerShell:**
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m gst_agent.main --stats
+```
+**Command Prompt (cmd.exe):**
+```cmd
+python -m venv .venv
+.venv\Scripts\activate.bat
+pip install -r requirements.txt
+python -m gst_agent.main --stats
+```
+**Bash (macOS/Linux/WSL/Git Bash):**
 ```bash
 python -m venv .venv
-.venv\Scripts\activate          # Windows
-source .venv/bin/activate       # macOS/Linux
+source .venv/bin/activate       # macOS/Linux/WSL
+source .venv/Scripts/activate   # Git Bash on Windows
 pip install -r requirements.txt
-
-python -m gst_agent.main --once          # run one pass now
-python -m gst_agent.main --stats         # see current state
+python -m gst_agent.main --stats
 ```
 
-All three produce the same result: downloads in
+### Step 3 — Confirm it worked
+
+Whichever path you chose, `--stats` on a fresh clone should print:
+```json
+{"total_documents": 0, "by_status": {}, "by_category": {}, "failed": []}
+```
+That confirms a working install with no leftover state. All three paths
+produce identical results from here: downloads in
 `data/downloads/<Category>/`, state in `data/state.db` (SQLite), logs in
 `data/logs/gst_agent.log`.
 
-Copy `.env.example` to `.env` to change any default (all settings have
-sensible built-in defaults, so this is optional; not used by the Docker
-path unless you also pass `--env-file .env` to `docker run`).
+Copy `.env.example` to `.env` to change any default (optional — every
+setting has a sensible built-in default; not used by Docker unless you
+also pass `--env-file .env` to `docker run`).
+
+Next: **"Testing guide"** below has a numbered walkthrough of every way to
+verify it's actually working — starting with the automated test suite (no
+network, seconds to run) before anything that touches real government
+sites.
 
 ## Web UI
 
@@ -103,10 +150,19 @@ type commands. It's a thin layer over the same `gst_agent.db`/`gst_agent.pipelin
 the CLI uses; it changes no behavior, it only calls the same functions
 `--once` and `--retry-failed` already call.
 
-```bash
+```
 gst-agent-ui                              # after setup.sh/setup.ps1, or:
 python -m gst_agent.web                   # after the manual venv path
-# Docker: docker run -p 5000:5000 -v "$(pwd)/data:/app/data" gst-law-docs-agent gst_agent.web
+```
+Docker (see "Getting started" for the shell-specific `-v` syntax):
+```powershell
+docker run --rm -p 5000:5000 -v "${PWD}\data:/app/data" gst-law-docs-agent gst_agent.web    # PowerShell
+```
+```cmd
+docker run --rm -p 5000:5000 -v "%cd%\data:/app/data" gst-law-docs-agent gst_agent.web      REM cmd.exe
+```
+```bash
+docker run --rm -p 5000:5000 -v "$(pwd)/data:/app/data" gst-law-docs-agent gst_agent.web    # bash
 ```
 Then open **http://127.0.0.1:5000**.
 
@@ -186,8 +242,8 @@ Packaging/deployment files at the project root: `pyproject.toml` (gives the
 install), `Dockerfile`/`.dockerignore` (containerized run with Tesseract
 pre-installed), `run_scheduled.ps1`/`install_scheduler.ps1`/`uninstall_scheduler.ps1`
 (Windows Task Scheduler, see "Running on a schedule"). None of them affect
-`gst_agent/`'s code — all three ways of running the project in "Quick
-start" execute the exact same pipeline.
+`gst_agent/`'s code — all three setup paths in "Getting started" execute
+the exact same pipeline.
 
 ### Data flow per document
 
@@ -331,7 +387,7 @@ which Task Scheduler does not set by default. `run_scheduled.ps1` does
 `Set-Location` to its own folder before running, so this isn't something
 you need to get right by hand either.
 
-**Works with either "Quick start" setup path, automatically.**
+**Works with either "Getting started" setup path, automatically.**
 `run_scheduled.ps1` checks whether a native `.venv` exists (from
 `setup.ps1`/`setup.sh` or a manual venv) and uses it directly if so;
 otherwise it falls back to running the Docker image instead (which must
@@ -434,11 +490,9 @@ reachable and their page structure hasn't drifted, without risking anything.
 
 ### 3. Native CLI (terminal) — the most direct way to watch it work
 
-```bash
-python -m venv .venv                              # or: ./setup.sh / .\setup.ps1 (also installs LLM extras)
-.venv\Scripts\activate                             # Windows; source .venv/bin/activate on macOS/Linux
-pip install -r requirements.txt
-
+Activate using whichever Path B/C command matched your shell in "Getting
+started," then (identical in PowerShell/cmd/bash once the venv is active):
+```
 python -m gst_agent.main --stats                   # see current state (empty on a fresh clone)
 python -m gst_agent.main --once                    # run a real pass -- prints {"run_id": N, "new_documents_downloaded": N}
 python -m gst_agent.main --stats                   # confirm the numbers changed as expected
@@ -452,29 +506,37 @@ match their category.
 
 ### 4. Web UI — click-through verification
 
-```bash
+```
 gst-agent-ui                                        # after setup.sh/setup.ps1, or:
 python -m gst_agent.web                             # after the manual venv path
 ```
-Open **http://127.0.0.1:5000**. Click "Run now" (confirms first — this is
-a real pass against real government sites); once running you can open a
-*second* browser tab to the Logs page and it stays responsive throughout
-(the server is multi-threaded specifically so a long run doesn't block
-everything else). Use the Documents page to filter by category/status and
-open a few real PDFs to sanity-check classification by eye.
+(Docker equivalent is in "Web UI" above — same three-shell `-v` syntax as
+"Getting started" Path A.) Open **http://127.0.0.1:5000**. Click "Run now"
+(confirms first — this is a real pass against real government sites);
+once running you can open a *second* browser tab to the Logs page and it
+stays responsive throughout (the server is multi-threaded specifically so
+a long run doesn't block everything else). Use the Documents page to
+filter by category/status and open a few real PDFs to sanity-check
+classification by eye.
 
 ### 5. Docker — the "does this work from a clean environment" check
 
-```bash
-docker build -t gst-law-docs-agent .
-docker run --rm -v "$(pwd)/data:/app/data" gst-law-docs-agent gst_agent.main --stats
-docker run --rm -v "$(pwd)/data:/app/data" gst-law-docs-agent                        # --once
-docker run --rm -p 5000:5000 -v "$(pwd)/data:/app/data" gst-law-docs-agent gst_agent.web
+Same build/run commands as "Getting started" Path A (all three shells
+verified there); add these two variants once you've confirmed `--stats`
+works:
+```powershell
+docker run --rm -v "${PWD}\data:/app/data" gst-law-docs-agent                              # PowerShell: --once
+docker run --rm -p 5000:5000 -v "${PWD}\data:/app/data" gst-law-docs-agent gst_agent.web    # PowerShell: web UI
 ```
-See the Windows path gotcha above if `-v "$(pwd)/data:..."` reports 0
-documents from Git Bash. This reads/writes the *same* `data/` folder as the
-native path — running native and Docker against the same project directory
-is expected to (and does) produce identical, consistent results.
+```bash
+docker run --rm -v "$(pwd)/data:/app/data" gst-law-docs-agent                              # bash: --once
+docker run --rm -p 5000:5000 -v "$(pwd)/data:/app/data" gst-law-docs-agent gst_agent.web    # bash: web UI
+```
+See the Windows + Git Bash gotcha in "Getting started" if `-v
+"$(pwd)/data:..."` reports 0 documents from Git Bash specifically. This
+reads/writes the *same* `data/` folder as the native path — running
+native and Docker against the same project directory is expected to (and
+does) produce identical, consistent results.
 
 ### 6. The daily schedule (Windows only, optional — not needed to evaluate the core system)
 
@@ -482,7 +544,7 @@ is expected to (and does) produce identical, consistent results.
 .\install_scheduler.ps1                        # one-time setup, registers a daily 10 AM task
 Get-ScheduledTask -TaskName "GST Law Document Agent" | Select-Object State
 ```
-Works the same regardless of which "Quick start" path you used — it
+Works the same regardless of which "Getting started" path you used — it
 auto-detects a native `.venv` and uses it if present, otherwise falls back
 to the built Docker image (see "Running on a schedule" for details).
 
