@@ -61,7 +61,13 @@ def retry_failed():
     with db.open_db(settings.db_path) as conn:
         try:
             result = pipeline.retry_failed(conn)
-            flash(f"Retried {result['retried']} failed document(s).", "success")
+            message = f"Retried {result['retried']} failed document(s)."
+            if result["skipped_permanent"]:
+                message += (
+                    f" Skipped {result['skipped_permanent']} that have failed "
+                    f"{settings.max_retry_attempts}+ times (considered permanently broken)."
+                )
+            flash(message, "success")
         except Exception as exc:
             flash(f"Retry failed: {exc}", "error")
     return redirect(url_for("dashboard"))

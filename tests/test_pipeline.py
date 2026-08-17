@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -277,6 +277,40 @@ def test_retry_failed_reprocesses_a_download_failure(conn, test_settings):
             result = pipeline.retry_failed(conn)
 
     assert result["retried"] == 1
+    assert result["skipped_permanent"] == 0
     stats = db.get_stats(conn)
     assert stats["by_status"]["done"] == 1
     assert stats["by_status"].get("failed", 0) == 0
+
+
+def test_retry_failed_stops_after_max_retry_attempts(conn, test_settings):
+    # Reproduces the "keeps retrying and freezes" complaint: a permanently
+    # broken URL (e.g. a dead link on the source's own page) must stop
+    # being retried after a bounded number of attempts, rather than costing
+    # real time on every single --retry-failed call forever.
+    test_settings = dataclasses.replace(test_settings, max_retry_attempts=2)
+    with patch("gst_agent.pipeline.settings", test_settings):
+        run_id = db.start_run(conn)
+        doc_id = db.insert_discovered(
+            conn, source="fake", source_page="x", doc_url="https://example.com/dead.pdf",
+            title="permanently dead", doc_number=None, doc_date=None,
+            source_hint_category="Circular", run_id=run_id,
+        )
+        db.record_failure(conn, doc_id, stage="download", reason="initial failure")  # failure_count=1
+        db.finish_run(conn, run_id, new_documents_downloaded=0, status="completed")
+
+        always_fails = MagicMock(side_effect=ConnectionError("still broken"))
+        with patch("gst_agent.pipeline.session.get", always_fails):
+            first = pipeline.retry_failed(conn)  # attempt #2 -- still under the cap, gets attempted, fails again -> failure_count=2
+
+        assert first["retried"] == 0  # attempted, but failed again -- not a successful retry
+        assert first["skipped_permanent"] == 0  # failure_count was 1 (< 2) at the time it was picked up
+        always_fails.assert_called_once()  # proves it WAS actually attempted this round
+
+        always_fails.reset_mock()
+        with patch("gst_agent.pipeline.session.get", always_fails):
+            second = pipeline.retry_failed(conn)  # failure_count(2) >= max_retry_attempts(2) -> skipped
+
+        assert second["retried"] == 0
+        assert second["skipped_permanent"] == 1
+        always_fails.assert_not_called()  # proves it was genuinely skipped, not attempted-and-failed-again

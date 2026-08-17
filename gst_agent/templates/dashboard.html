@@ -4,17 +4,36 @@
   <div class="page-header">
     <h1>Dashboard</h1>
     <div class="actions">
-      <form method="post" action="{{ url_for('run_now') }}"
-            onsubmit="return confirm('Run discovery/download/classify now? This contacts real government sites, can take a few minutes, and downloads real documents. Continue?');">
-        <button class="btn btn-primary" type="submit">Run now</button>
+      <form method="post" action="{{ url_for('run_now') }}" onsubmit="return startRun(this);">
+        <button class="btn btn-primary" type="submit">
+          <span class="btn-spinner" aria-hidden="true"></span><span class="btn-label">Run now</span>
+        </button>
       </form>
       {% if stats.by_status.get('failed') %}
-      <form method="post" action="{{ url_for('retry_failed') }}">
-        <button class="btn btn-secondary" type="submit">Retry {{ stats.by_status.failed }} failed</button>
+      <form method="post" action="{{ url_for('retry_failed') }}" onsubmit="return startRun(this, false);">
+        <button class="btn btn-secondary" type="submit">
+          <span class="btn-spinner" aria-hidden="true"></span><span class="btn-label">Retry {{ stats.by_status.failed }} failed</span>
+        </button>
       </form>
       {% endif %}
     </div>
   </div>
+  <script>
+    // Real <form> POSTs, not fetch/AJAX -- the browser navigates away once
+    // the request completes, so this only needs to keep the button showing
+    // "in progress" for as long as the page stays put. confirmFirst is
+    // false for Retry (no confirm dialog needed there).
+    function startRun(form, confirmFirst = true) {
+      if (confirmFirst && !confirm('Run discovery/download/classify now? This contacts real government sites, can take a few minutes, and downloads real documents. Continue?')) {
+        return false;
+      }
+      const button = form.querySelector('button');
+      button.disabled = true;
+      button.classList.add('btn-loading');
+      button.querySelector('.btn-label').textContent = 'Running... this may take a few minutes';
+      return true;
+    }
+  </script>
 
   <section class="stat-grid">
     <div class="stat-card">

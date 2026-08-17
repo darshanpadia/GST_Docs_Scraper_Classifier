@@ -129,6 +129,10 @@ def test_old_database_without_proposed_category_column_is_migrated(tmp_path: Pat
         row = conn.execute("SELECT proposed_category FROM documents WHERE id = ?", (doc_id,)).fetchone()
         assert row["proposed_category"] == "Advisory"
 
+        # Same legacy table also predates failure_count -- must migrate too.
+        db.record_failure(conn, doc_id, stage="download", reason="x")
+        assert db.get_document(conn, doc_id)["failure_count"] == 1
+
 
 def test_category_promotion_flow(tmp_path: Path):
     with db.open_db(tmp_path / "state.db") as conn:
@@ -202,3 +206,27 @@ def test_get_documents_filters_by_category_and_status_with_pagination(conn):
     assert len(page1) == 2
     assert len(page2) == 2
     assert {r["id"] for r in page1}.isdisjoint({r["id"] for r in page2})
+
+
+def test_record_failure_increments_failure_count(conn):
+    run_id = db.start_run(conn)
+    doc_id = _insert_sample(conn, run_id)
+
+    db.record_failure(conn, doc_id, stage="download", reason="attempt 1")
+    assert db.get_document(conn, doc_id)["failure_count"] == 1
+    db.record_failure(conn, doc_id, stage="download", reason="attempt 2")
+    assert db.get_document(conn, doc_id)["failure_count"] == 2
+
+
+def test_get_retryable_failed_documents_excludes_ones_past_max_attempts(conn):
+    run_id = db.start_run(conn)
+    still_retryable = _insert_sample(conn, run_id, url="https://cbic-gst.gov.in/pdf/a.pdf")
+    permanently_broken = _insert_sample(conn, run_id, url="https://cbic-gst.gov.in/pdf/b.pdf")
+
+    db.record_failure(conn, still_retryable, stage="download", reason="x")  # failure_count=1
+    for _ in range(3):
+        db.record_failure(conn, permanently_broken, stage="download", reason="x")  # failure_count=3
+
+    retryable = db.get_retryable_failed_documents(conn, max_attempts=3)
+    assert {r["id"] for r in retryable} == {still_retryable}
+    assert db.get_permanently_failed_count(conn, max_attempts=3) == 1

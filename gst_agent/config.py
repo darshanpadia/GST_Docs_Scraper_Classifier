@@ -93,6 +93,14 @@ class Settings:
     web_ui_max_new_docs_per_run: int = field(
         default_factory=lambda: _env_int("WEB_UI_MAX_NEW_DOCS_PER_RUN", 2)
     )
+    # A document stops being retried by --retry-failed once it has failed
+    # this many times total (documents.failure_count) -- protects against a
+    # permanently broken URL (e.g. a dead link on the source's own listing
+    # page) being re-attempted forever, costing real time on every single
+    # --retry-failed call for something that can never succeed.
+    max_retry_attempts: int = field(
+        default_factory=lambda: _env_int("MAX_RETRY_ATTEMPTS", 3)
+    )
 
     # --- politeness / HTTP ---
     request_delay_seconds: float = field(

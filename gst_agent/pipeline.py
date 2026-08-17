@@ -274,11 +274,27 @@ def run_once(conn: sqlite3.Connection, *, max_new_docs: int | None = None) -> di
 
 
 def retry_failed(conn: sqlite3.Connection) -> dict:
-    """Re-attempt every document currently in status='failed'. Documents that
-    failed at the download stage are re-downloaded; documents that failed
-    later (extract/classify/file) already have a local file and just re-enter
-    the pipeline from where they stopped."""
-    failed = db.get_failed_documents(conn)
+    """Re-attempt every document currently in status='failed' that hasn't
+    already hit settings.max_retry_attempts. Documents that failed at the
+    download stage are re-downloaded; documents that failed later
+    (extract/classify/file) already have a local file and just re-enter the
+    pipeline from where they stopped.
+
+    Documents at or beyond max_retry_attempts are skipped -- a permanently
+    broken URL (a dead link on the source's own listing page, for example)
+    will never succeed no matter how many times it's retried, so retrying
+    it forever on every --retry-failed call would only waste real time
+    without ever making progress."""
+    failed = db.get_retryable_failed_documents(conn, max_attempts=settings.max_retry_attempts)
+    skipped_permanent = db.get_permanently_failed_count(
+        conn, max_attempts=settings.max_retry_attempts
+    )
+    if skipped_permanent:
+        logger.info(
+            "Skipping %d document(s) that have already failed %d+ times "
+            "(considered permanently broken, not retried automatically)",
+            skipped_permanent, settings.max_retry_attempts,
+        )
     active_categories = get_active_categories(conn)
     retried = 0
 
@@ -298,4 +314,4 @@ def retry_failed(conn: sqlite3.Connection) -> dict:
         _process_document(conn, row, active_categories)
         retried += 1
 
-    return {"retried": retried}
+    return {"retried": retried, "skipped_permanent": skipped_permanent}

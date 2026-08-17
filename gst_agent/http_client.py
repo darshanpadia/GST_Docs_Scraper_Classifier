@@ -25,6 +25,14 @@ class RobotsDisallowed(Exception):
     """Raised when robots.txt forbids fetching a URL. Never bypass this."""
 
 
+class PermanentHTTPError(requests.HTTPError):
+    """A 4xx client error other than 429 (Too Many Requests) -- retrying
+    won't help, since the URL is permanently wrong (moved, removed, typo'd
+    on the source's own page), not experiencing a transient problem. Raised
+    immediately, on the first attempt, instead of being retried like a
+    genuine transient failure (a 5xx server error or a network exception)."""
+
+
 class PoliteSession:
     def __init__(self) -> None:
         self._session = requests.Session()
@@ -89,12 +97,18 @@ class PoliteSession:
                 response = self._session.get(
                     url, timeout=settings.request_timeout_seconds, **kwargs
                 )
+                if 400 <= response.status_code < 500 and response.status_code != 429:
+                    raise PermanentHTTPError(
+                        f"Client error {response.status_code} for {url} -- not retrying"
+                    )
                 if response.status_code >= 500:
                     raise requests.HTTPError(
                         f"Server error {response.status_code} for {url}"
                     )
                 response.raise_for_status()
                 return response
+            except PermanentHTTPError:
+                raise
             except requests.RequestException as exc:
                 last_exc = exc
                 backoff = 2 ** (attempt - 1)

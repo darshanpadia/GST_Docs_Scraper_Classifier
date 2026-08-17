@@ -170,22 +170,27 @@ Then open **http://127.0.0.1:5000**.
   category, a "Run now" button (triggers a real pass — confirmed before
   running, since it contacts real government sites), a "Retry failed"
   button, recent run history, and full detail on any failed documents.
-  **"Run now" is deliberately capped much lower than a real scheduled
-  run** (`WEB_UI_MAX_NEW_DOCS_PER_RUN`, default 2, vs `MAX_NEW_DOCS_PER_RUN`,
-  default 100) — it's a "confirm the agent is alive and working" button,
-  not a way to do the day's real download work from the browser. Discovery
-  itself is never capped either way, so clicking it repeatedly still builds
-  up a full backlog for the next real scheduled run to work through.
+  Both buttons show a spinner and disable themselves for as long as the
+  request is in flight, so a multi-minute real pass reads as "working," not
+  as a hung page. **"Run now" is deliberately capped much lower than a real
+  scheduled run** (`WEB_UI_MAX_NEW_DOCS_PER_RUN`, default 2, vs
+  `MAX_NEW_DOCS_PER_RUN`, default 100) — it's a "confirm the agent is alive
+  and working" button, not a way to do the day's real download work from
+  the browser. Discovery itself is never capped either way, so clicking it
+  repeatedly still builds up a full backlog for the next real scheduled
+  run to work through.
 - **Documents** — every discovered document, filterable by category and
-  status, with a link to the original source URL and an "Open PDF" link
-  that serves the actual downloaded file straight from disk.
+  status. The document's **title is the link to its original source URL**;
+  a separate "Open PDF" link serves the actual downloaded file straight
+  from disk when one exists.
 - **Logs** — tails `data/logs/gst_agent.log` so you can see exactly what
   happened during the last run without leaving the browser.
 
 Binds to `127.0.0.1` only and has no authentication — it's a local operator
 console for whoever is at the machine, not a service meant to be exposed to
-a network. No JS framework, no CSS framework: server-rendered HTML with one
-small hand-written stylesheet, kept intentionally simple.
+a network. No JS framework, no CSS framework: server-rendered HTML and one
+hand-written stylesheet, plus one small vanilla-JS function for the
+run-in-progress spinner — kept intentionally simple.
 
 ## What it does
 
@@ -436,6 +441,19 @@ python -m gst_agent.main --retry-failed
 `python -m gst_agent.main --stats` shows current counts by status and
 category, plus every failed document's stage and reason.
 
+**Retries are bounded on two levels, not indefinite.** A single HTTP
+request retries up to `MAX_RETRIES` times, but only for *transient*
+failures (a 5xx server error, a genuine network exception, or a 429 rate
+limit) — a 404/403/400 fails immediately on the first attempt instead,
+since retrying a permanently dead or forbidden URL can never succeed and
+previously wasted real time doing so. Separately, `--retry-failed` itself
+stops re-attempting a specific document once it has failed
+`MAX_RETRY_ATTEMPTS` times total (default 3) — a document that's proven
+permanently broken (e.g. a dead link on the source's own listing page,
+which does happen — see `gst_agent/sources/cbic.py`) is skipped on future
+`--retry-failed` calls rather than retried forever, and the skip count is
+reported alongside how many were actually retried.
+
 ## Configuration
 
 All settings live in `gst_agent/config.py` with sensible defaults, and are
@@ -449,6 +467,7 @@ Key ones:
 |---|---|---|
 | `MAX_NEW_DOCS_PER_RUN` | `100` | Cap on **new** documents per run for the CLI/scheduler (the real budget) |
 | `WEB_UI_MAX_NEW_DOCS_PER_RUN` | `2` | Separate, lower cap only for the web UI's "Run now" button |
+| `MAX_RETRY_ATTEMPTS` | `3` | A document stops being auto-retried by `--retry-failed` after this many total failures |
 | `ENABLED_SOURCES` | `cbic,gstcouncil` | Comma-separated source modules to run |
 | `ENABLE_LLM_FALLBACK` | `false` | Turn on the LLM classification fallback |
 | `LLM_PROVIDER_ORDER` | `gemini,groq` | Providers tried in order (needs `GEMINI_API_KEY`/`GROQ_API_KEY`) |
@@ -466,14 +485,17 @@ does something more real (more network, more side effects).
 ```bash
 pytest -q                    # native venv (activate first) or Docker: docker run --rm --entrypoint pytest gst-law-docs-agent -q
 ```
-74 tests, all against mocked network/LLM calls. Covers: the DB layer
-(dedup, lifecycle, restart-safety, category promotion, schema migration),
-each source's HTML parsing (against real page structure captured from the
-live sites), the extractor (real minimal PDFs, OCR path mocked), the
-classifier + all 3 LLM providers (rule-based patterns, provider fallback
-chain, hallucinated-category handling), the pipeline (discovery, the
-100-doc cap, cross-run backlog resumption, per-document failure isolation,
-category promotion), and the web UI (every route via Flask's test client —
+84 tests, all against mocked network/LLM calls. Covers: the DB layer
+(dedup, lifecycle, restart-safety, category promotion, schema migration,
+failure-count tracking), the polite HTTP client (permanent 4xx errors fail
+fast without retrying; genuine transient failures -- 5xx, 429, network
+exceptions -- still retry), each source's HTML parsing (against real page
+structure captured from the live sites), the extractor (real minimal
+PDFs, OCR path mocked), the classifier + all 3 LLM providers (rule-based
+patterns, provider fallback chain, hallucinated-category handling), the
+pipeline (discovery, the 100-doc cap, cross-run backlog resumption,
+per-document failure isolation, the retry-attempt cap, category
+promotion), and the web UI (every route via Flask's test client --
 rendering, filtering, real PDF byte-serving). Expect `NN passed` with no
 failures; a stray `DeprecationWarning` from inside a third-party SDK is
 harmless.

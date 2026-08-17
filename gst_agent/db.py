@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS documents (
     status TEXT NOT NULL DEFAULT 'discovered',
     failure_stage TEXT,
     failure_reason TEXT,
+    failure_count INTEGER NOT NULL DEFAULT 0,
     ocr_used INTEGER NOT NULL DEFAULT 0,
     run_id INTEGER,
     discovered_at TEXT NOT NULL,
@@ -99,6 +100,7 @@ def get_connection(db_path: Path) -> sqlite3.Connection:
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _ensure_column(conn, "documents", "proposed_category", "TEXT")
+    _ensure_column(conn, "documents", "failure_count", "INTEGER NOT NULL DEFAULT 0")
     with conn:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_documents_proposed_category "
@@ -262,11 +264,15 @@ def mark_done(conn: sqlite3.Connection, doc_id: int, *, local_path: str) -> None
 def record_failure(
     conn: sqlite3.Connection, doc_id: int, *, stage: str, reason: str
 ) -> None:
+    """failure_count increments every time -- get_retryable_failed_documents
+    uses it to stop --retry-failed from re-attempting a document forever
+    once it's proven permanently broken (see pipeline.retry_failed)."""
     with conn:
         conn.execute(
             """
             UPDATE documents
-            SET status = ?, failure_stage = ?, failure_reason = ?, processed_at = ?
+            SET status = ?, failure_stage = ?, failure_reason = ?,
+                failure_count = failure_count + 1, processed_at = ?
             WHERE id = ?
             """,
             (STATUS_FAILED, stage, reason[:2000], _now(), doc_id),
@@ -383,6 +389,28 @@ def get_failed_documents(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT * FROM documents WHERE status = ?", (STATUS_FAILED,)
     ).fetchall()
+
+
+def get_retryable_failed_documents(
+    conn: sqlite3.Connection, *, max_attempts: int
+) -> list[sqlite3.Row]:
+    """Failed documents that haven't yet hit max_attempts -- used by
+    pipeline.retry_failed() instead of get_failed_documents() so a
+    permanently broken URL (e.g. a dead link on the source's own page,
+    which will never succeed no matter how many times it's retried) stops
+    being retried after a bounded number of tries, rather than costing
+    real time on every single --retry-failed call indefinitely."""
+    return conn.execute(
+        "SELECT * FROM documents WHERE status = ? AND failure_count < ?",
+        (STATUS_FAILED, max_attempts),
+    ).fetchall()
+
+
+def get_permanently_failed_count(conn: sqlite3.Connection, *, max_attempts: int) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM documents WHERE status = ? AND failure_count >= ?",
+        (STATUS_FAILED, max_attempts),
+    ).fetchone()[0]
 
 
 def get_pending_documents(conn: sqlite3.Connection) -> list[sqlite3.Row]:

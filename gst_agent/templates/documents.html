@@ -34,13 +34,15 @@
     <tbody>
       {% for d in documents %}
       <tr>
-        <td class="truncate" title="{{ d.title }}">{{ d.title }}</td>
+        <td class="truncate">
+          <a href="{{ d.doc_url }}" target="_blank" rel="noopener" title="Open original source: {{ d.title }}">{{ d.title }}</a>
+        </td>
         <td><span class="badge">{{ d.category or d.source_hint_category or "-" }}</span></td>
         <td>
           <span class="badge badge-{{ d.status }}">{{ d.status }}</span>
           {% if d.status == 'failed' %}<span class="hint" title="{{ d.failure_reason }}">({{ d.failure_stage }})</span>{% endif %}
         </td>
-        <td><a href="{{ d.doc_url }}" target="_blank" rel="noopener">{{ d.source }}</a></td>
+        <td>{{ d.source }}</td>
         <td>{{ d.discovered_at[:19] }}</td>
         <td>
           {% if d.local_path %}

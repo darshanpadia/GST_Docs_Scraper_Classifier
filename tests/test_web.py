@@ -150,6 +150,23 @@ def test_documents_page_lists_seeded_document(client, test_settings):
     assert b"1 document(s)" in response.data
 
 
+def test_documents_page_title_links_to_source_not_the_source_column(client, test_settings):
+    # The document's name/title is what a reviewer expects to click to see
+    # the document -- the link belongs there, not hidden under the source
+    # label ("cbic") in its own column, which used to be the only clickable
+    # element in the row.
+    _seed_one_document(test_settings, status="done", category="Circular")
+    response = client.get("/documents")
+    html = response.data.decode()
+
+    assert '<a href="https://example.com/a.pdf"' in html
+    title_link_pos = html.index('<a href="https://example.com/a.pdf"')
+    assert "Sample Circular</a>" in html[title_link_pos:title_link_pos + 200]
+
+    # "cbic" (the source label) must appear as plain text, not as anchor text.
+    assert "<a" not in html[html.index(">cbic<") - 10 : html.index(">cbic<")]
+
+
 def test_documents_page_filters_by_category(client, test_settings):
     _seed_one_document(test_settings, status="done", category="Circular")
     matching = client.get("/documents?category=Circular")
