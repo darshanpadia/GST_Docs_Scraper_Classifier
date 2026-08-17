@@ -22,7 +22,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-llm = ["anthropic>=0.40"]
+# gemini/groq are the free-tier providers enabled by default (see
+# .env.example LLM_PROVIDER_ORDER); anthropic is optional and not free.
+llm = ["google-genai>=1.0", "groq>=0.11", "anthropic>=0.40"]
 dev = ["pytest>=8.0"]
 
 # After `pip install -e .`, this gives a `gst-agent` command instead of

@@ -2,7 +2,7 @@
 are mocked -- this module tests the orchestration logic (dedupe, the 100-doc
 cap, per-document failure isolation, category promotion), not the individual
 building blocks, which have their own unit tests (test_extractor.py,
-test_classifier.py, test_llm_client.py)."""
+test_classifier.py, test_llm_providers_*.py)."""
 from __future__ import annotations
 
 import dataclasses
@@ -202,6 +202,21 @@ def test_run_once_isolates_a_single_document_failure(conn, test_settings):
     assert stats["by_status"]["done"] == 1
 
 
+class _FakeLLMProvider:
+    """Stands in for a real gst_agent.llm_providers.base.LLMProvider."""
+
+    name = "fake-llm"
+
+    def __init__(self, result: LLMClassification):
+        self._result = result
+
+    def is_configured(self) -> bool:
+        return True
+
+    def classify(self, *, title, text, active_categories):
+        return self._result
+
+
 def test_category_promotion_after_recurring_llm_suggestions(conn, test_settings):
     test_settings = dataclasses.replace(
         test_settings, max_new_docs_per_run=10, category_promotion_threshold=3, enable_llm_fallback=True
@@ -210,14 +225,16 @@ def test_category_promotion_after_recurring_llm_suggestions(conn, test_settings)
         _doc(f"https://example.com/{i}.pdf", category_hint="Other", title="An unusual advisory document")
         for i in range(3)
     ]
+    fake_provider = _FakeLLMProvider(
+        LLMClassification(matched_category=None, proposed_category="Advisory")
+    )
 
     with patch("gst_agent.pipeline.settings", test_settings), \
          patch("gst_agent.pipeline.get_enabled_sources", return_value=[_FakeSource(docs)]), \
          patch("gst_agent.pipeline.session.get", side_effect=_get_by_url), \
          patch("gst_agent.pipeline.extract_text", side_effect=_no_ocr_extraction), \
          patch("gst_agent.classifier.settings", test_settings), \
-         patch("gst_agent.llm_client.classify_document",
-               return_value=LLMClassification(matched_category=None, proposed_category="Advisory")):
+         patch("gst_agent.llm_providers.get_ordered_providers", return_value=[fake_provider]):
         result = pipeline.run_once(conn)
 
     assert result["new_documents_downloaded"] == 3

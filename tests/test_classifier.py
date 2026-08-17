@@ -33,19 +33,45 @@ def test_returns_other_when_nothing_matches():
     assert confident is False
 
 
-def test_llm_fallback_disabled_by_default_returns_none():
-    # ENABLE_LLM_FALLBACK defaults to False -- no patching needed to prove
-    # the fallback stays off unless explicitly enabled.
-    result = classifier.classify_with_llm(text="x", title="y", active_categories=["Order"])
+class _FakeProvider:
+    def __init__(self, name, *, configured=True, result=None, error=None):
+        self.name = name
+        self._configured = configured
+        self._result = result
+        self._error = error
+
+    def is_configured(self):
+        return self._configured
+
+    def classify(self, *, title, text, active_categories):
+        if self._error is not None:
+            raise self._error
+        return self._result
+
+
+_ENABLED = type("S", (), {"enable_llm_fallback": True})()
+
+
+def test_llm_fallback_disabled_returns_none_without_calling_any_provider():
+    # Explicitly mocked to enable_llm_fallback=False -- must NOT rely on
+    # that being the ambient default. A developer's own .env can (and, in
+    # this project's real one, does) set ENABLE_LLM_FALLBACK=true with real
+    # API keys; a test that assumes otherwise silently starts making real
+    # network calls to a real LLM provider instead of testing anything.
+    disabled = type("S", (), {"enable_llm_fallback": False})()
+    with patch("gst_agent.classifier.settings", disabled), \
+         patch("gst_agent.llm_providers.get_ordered_providers") as mock_get_providers:
+        result = classifier.classify_with_llm(text="x", title="y", active_categories=["Order"])
+
     assert result is None
+    mock_get_providers.assert_not_called()
 
 
 def test_llm_fallback_matches_an_existing_category():
-    fake_settings = type("S", (), {"enable_llm_fallback": True})()
-    fake_result = LLMClassification(matched_category="Order", proposed_category=None)
+    provider = _FakeProvider("p", result=LLMClassification(matched_category="Order", proposed_category=None))
 
-    with patch("gst_agent.classifier.settings", fake_settings), \
-         patch("gst_agent.llm_client.classify_document", return_value=fake_result):
+    with patch("gst_agent.classifier.settings", _ENABLED), \
+         patch("gst_agent.llm_providers.get_ordered_providers", return_value=[provider]):
         result = classifier.classify_with_llm(text="x", title="y", active_categories=["Order"])
 
     assert result.matched_category == "Order"
@@ -53,11 +79,10 @@ def test_llm_fallback_matches_an_existing_category():
 
 
 def test_llm_fallback_proposes_a_new_category():
-    fake_settings = type("S", (), {"enable_llm_fallback": True})()
-    fake_result = LLMClassification(matched_category=None, proposed_category="Advisory")
+    provider = _FakeProvider("p", result=LLMClassification(matched_category=None, proposed_category="Advisory"))
 
-    with patch("gst_agent.classifier.settings", fake_settings), \
-         patch("gst_agent.llm_client.classify_document", return_value=fake_result):
+    with patch("gst_agent.classifier.settings", _ENABLED), \
+         patch("gst_agent.llm_providers.get_ordered_providers", return_value=[provider]):
         result = classifier.classify_with_llm(text="x", title="y", active_categories=["Order"])
 
     assert result.matched_category is None
@@ -65,10 +90,35 @@ def test_llm_fallback_proposes_a_new_category():
 
 
 def test_llm_fallback_swallows_errors_instead_of_raising():
-    fake_settings = type("S", (), {"enable_llm_fallback": True})()
+    provider = _FakeProvider("p", error=RuntimeError("boom"))
 
-    with patch("gst_agent.classifier.settings", fake_settings), \
-         patch("gst_agent.llm_client.classify_document", side_effect=RuntimeError("boom")):
+    with patch("gst_agent.classifier.settings", _ENABLED), \
+         patch("gst_agent.llm_providers.get_ordered_providers", return_value=[provider]):
         result = classifier.classify_with_llm(text="x", title="y", active_categories=["Order"])
 
     assert result is None
+
+
+def test_llm_fallback_falls_through_to_the_next_configured_provider():
+    # The whole point of a provider chain: one free API's outage/rate limit
+    # doesn't take the fallback down as long as another configured provider
+    # can still answer.
+    failing = _FakeProvider("gemini", error=RuntimeError("rate limited"))
+    working = _FakeProvider("groq", result=LLMClassification(matched_category="Order", proposed_category=None))
+
+    with patch("gst_agent.classifier.settings", _ENABLED), \
+         patch("gst_agent.llm_providers.get_ordered_providers", return_value=[failing, working]):
+        result = classifier.classify_with_llm(text="x", title="y", active_categories=["Order"])
+
+    assert result.matched_category == "Order"
+
+
+def test_llm_fallback_skips_unconfigured_providers_without_calling_them():
+    unconfigured = _FakeProvider("gemini", configured=False, error=AssertionError("should not be called"))
+    working = _FakeProvider("groq", result=LLMClassification(matched_category="Circular", proposed_category=None))
+
+    with patch("gst_agent.classifier.settings", _ENABLED), \
+         patch("gst_agent.llm_providers.get_ordered_providers", return_value=[unconfigured, working]):
+        result = classifier.classify_with_llm(text="x", title="y", active_categories=["Circular"])
+
+    assert result.matched_category == "Circular"

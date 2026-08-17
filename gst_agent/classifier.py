@@ -5,13 +5,18 @@ GST legal documents, which follow predictable boilerplate phrasing ("in
 exercise of the powers conferred by section... hereby makes the following
 rules", "Circular No. .../2024", etc). It runs on every document.
 
-The LLM fallback (gst_agent.llm_client, disabled by default -- see
+The LLM fallback (gst_agent.llm_providers, disabled by default -- see
 Settings.enable_llm_fallback) only runs for the minority the rules can't
 confidently place. It can either confirm one of the currently active
 categories or propose a brand-new one; proposals are not filed immediately
 (see gst_agent.pipeline._promote_recurring_categories) -- a category only
 becomes real once it has been independently proposed for enough different
 documents to be a genuine recurring pattern, not a one-off guess.
+
+Multiple LLM providers can be configured (Settings.llm_provider_order,
+default "gemini,groq") -- classify_with_llm tries each in order and only
+gives up once every configured one has failed, so one provider's rate limit
+or outage doesn't take the whole fallback down.
 """
 from __future__ import annotations
 
@@ -67,20 +72,25 @@ def classify_rule_based(
 def classify_with_llm(
     *, text: str, title: str, active_categories: list[str]
 ) -> LLMClassification | None:
-    """Ask the LLM to classify a document the rule-based pass couldn't place
-    confidently. Returns None if the fallback is disabled, unavailable, or
-    the call fails for any reason -- callers must treat that as "leave it
-    Other", not as an error that aborts the document.
+    """Ask the LLM fallback chain to classify a document the rule-based pass
+    couldn't place confidently. Returns None if the fallback is disabled, no
+    configured provider has an API key, or every configured provider's call
+    fails -- callers must treat that as "leave it Other", not as an error
+    that aborts the document.
     """
     if not settings.enable_llm_fallback:
         return None
 
-    from gst_agent import llm_client  # local import: keep `anthropic` optional
+    from gst_agent.llm_providers import get_ordered_providers  # local import: keep SDKs optional
 
-    try:
-        return llm_client.classify_document(
-            title=title, text=text, active_categories=active_categories
-        )
-    except Exception as exc:
-        logger.warning("LLM classification fallback failed: %s", exc)
-        return None
+    for provider in get_ordered_providers():
+        if not provider.is_configured():
+            logger.debug("Skipping LLM provider %r -- not configured", provider.name)
+            continue
+        try:
+            return provider.classify(title=title, text=text, active_categories=active_categories)
+        except Exception as exc:
+            logger.warning("LLM provider %r classification failed: %s", provider.name, exc)
+            continue
+
+    return None

@@ -6,7 +6,7 @@ Set-Location $PSScriptRoot
 python -m venv .venv
 & .\.venv\Scripts\Activate.ps1
 pip install --upgrade pip
-pip install -e ".[dev]"
+pip install -e ".[dev,llm]"
 
 Write-Host ""
 Write-Host "Setup complete."

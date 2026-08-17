@@ -128,7 +128,12 @@ def main() -> None:
     # `-p` no matter what, so it must bind wider inside the container.
     host = os.environ.get("WEB_UI_HOST", "127.0.0.1")
     port = int(os.environ.get("WEB_UI_PORT", "5000"))
-    app.run(host=host, port=port, debug=False)
+    # threaded=True matters here: "Run now" can take several minutes (it's a
+    # real scrape with rate limiting), and without this the single-threaded
+    # dev server can't serve *any* other page -- including Logs -- until
+    # that request finishes, making a long run look hung with no way to
+    # check on it.
+    app.run(host=host, port=port, debug=False, threaded=True)
 
 
 if __name__ == "__main__":

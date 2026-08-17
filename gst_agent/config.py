@@ -130,6 +130,29 @@ class Settings:
     enable_llm_fallback: bool = field(
         default_factory=lambda: _env_bool("ENABLE_LLM_FALLBACK", False)
     )
+    # Providers tried in this order (see gst_agent.llm_providers); "anthropic"
+    # isn't in the default list since it isn't free -- add it yourself if you
+    # have a key. Each provider is skipped (not an error) if its own API key
+    # env var isn't set, so listing a provider you haven't configured is
+    # harmless.
+    llm_provider_order: str = field(
+        default_factory=lambda: os.environ.get("LLM_PROVIDER_ORDER", "gemini,groq")
+    )
+    gemini_api_key: str | None = field(
+        default_factory=lambda: os.environ.get("GEMINI_API_KEY") or None
+    )
+    gemini_model: str = field(
+        default_factory=lambda: os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+    )
+    groq_api_key: str | None = field(
+        default_factory=lambda: os.environ.get("GROQ_API_KEY") or None
+    )
+    groq_model: str = field(
+        default_factory=lambda: os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
+    )
+    # Anthropic's own SDK reads ANTHROPIC_API_KEY directly from the
+    # environment (see llm_providers/anthropic_provider.py) -- no field
+    # needed here for the key itself, only its model name.
     llm_model: str = field(
         default_factory=lambda: os.environ.get("LLM_MODEL", "claude-opus-5")
     )

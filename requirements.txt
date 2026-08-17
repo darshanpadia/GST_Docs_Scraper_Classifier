@@ -7,7 +7,11 @@ Pillow>=10.0
 python-dotenv>=1.0
 Flask>=3.0
 
-# Only required if ENABLE_LLM_FALLBACK=true (see .env.example).
+# Only required if ENABLE_LLM_FALLBACK=true (see .env.example). gemini/groq
+# are the free-tier providers enabled by default; anthropic is optional
+# (isn't free) and not in the default LLM_PROVIDER_ORDER.
+google-genai>=1.0
+groq>=0.11
 anthropic>=0.40
 
 # dev / test

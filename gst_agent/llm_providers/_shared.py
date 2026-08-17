@@ -1,24 +1,13 @@
-"""Thin wrapper around the Anthropic API for the classifier's LLM fallback.
-
-Only imported when ENABLE_LLM_FALLBACK is set (see gst_agent.classifier), so
-the `anthropic` package and an API key stay optional for anyone who only
-wants the rule-based classifier. The Anthropic client reads ANTHROPIC_API_KEY
-from the environment itself -- no key handling lives in this project.
-"""
+"""Prompt/schema/response-parsing logic shared by every provider, so the
+three SDK-specific modules only differ in how they actually call their API,
+not in what they ask or how they interpret the answer."""
 from __future__ import annotations
 
-import json
-
-import anthropic
-
-from gst_agent.config import settings
 from gst_agent.models import LLMClassification
 
-_client: anthropic.Anthropic | None = None
+NO_MATCH = "NONE"
 
-_NO_MATCH = "NONE"
-
-_SCHEMA = {
+RESPONSE_SCHEMA: dict = {
     "type": "object",
     "properties": {
         "matched_category": {
@@ -42,16 +31,15 @@ _SCHEMA = {
 }
 
 
-def _get_client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        _client = anthropic.Anthropic()
-    return _client
-
-
-def classify_document(
-    *, title: str, text: str, active_categories: list[str]
-) -> LLMClassification:
+def build_prompt(
+    title: str, text: str, active_categories: list[str], *, include_json_instructions: bool = False
+) -> str:
+    """include_json_instructions=True is for providers with no native
+    structured-output schema parameter (Groq's JSON mode just guarantees
+    *valid* JSON, not a particular shape -- the desired keys have to be
+    spelled out in the prompt itself). Gemini and Anthropic pass their own
+    schema to the API directly, so they leave this off to avoid a redundant
+    wall of JSON schema in the prompt text."""
     excerpt = text[:4000]
     prompt = (
         "You classify Indian GST law documents (e.g. Acts, Rules, "
@@ -64,21 +52,19 @@ def classify_document(
         "just an awkward match -- set matched_category to NONE and propose "
         "a short new category name instead."
     )
-    response = _get_client().messages.create(
-        model=settings.llm_model,
-        max_tokens=200,
-        output_config={"effort": "low", "format": {"type": "json_schema", "schema": _SCHEMA}},
-        messages=[{"role": "user", "content": prompt}],
-    )
-    if response.stop_reason == "refusal":
-        raise RuntimeError("LLM classification request was refused")
+    if include_json_instructions:
+        prompt += (
+            '\n\nRespond with a single JSON object, no other text, exactly '
+            'in this shape: {"matched_category": "<one of the active '
+            'categories, or NONE>", "proposed_category": "<short new '
+            'category name if NONE, else empty string>"}'
+        )
+    return prompt
 
-    text_block = next(block.text for block in response.content if block.type == "text")
-    data = json.loads(text_block)
 
+def parse_response(data: dict, active_categories: list[str]) -> LLMClassification:
     matched = data.get("matched_category") or None
-    if matched == _NO_MATCH or (matched is not None and matched not in active_categories):
-        matched = None
+    if matched == NO_MATCH or (matched is not None and matched not in active_categories):
+        matched = None  # hallucinated category name -> treat as no match, not a bogus filing
     proposed = data.get("proposed_category") or None
-
     return LLMClassification(matched_category=matched, proposed_category=proposed)
