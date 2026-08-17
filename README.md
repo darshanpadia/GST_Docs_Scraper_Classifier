@@ -398,7 +398,7 @@ does something more real (more network, more side effects).
 ```bash
 pytest -q                    # native venv (activate first) or Docker: docker run --rm --entrypoint pytest gst-law-docs-agent -q
 ```
-72 tests, all against mocked network/LLM calls. Covers: the DB layer
+74 tests, all against mocked network/LLM calls. Covers: the DB layer
 (dedup, lifecycle, restart-safety, category promotion, schema migration),
 each source's HTML parsing (against real page structure captured from the
 live sites), the extractor (real minimal PDFs, OCR path mocked), the
@@ -464,17 +464,21 @@ documents from Git Bash. This reads/writes the *same* `data/` folder as the
 native path — running native and Docker against the same project directory
 is expected to (and does) produce identical, consistent results.
 
-### 6. Verifying the daily schedule actually fires
+### 6. The daily schedule (Windows only, optional — not needed to evaluate the core system)
 
-Windows Task Scheduler doesn't make it obvious a task ran successfully
-without checking:
 ```powershell
+.\install_scheduler.ps1                        # one-time setup, registers a daily 10 AM task
 Get-ScheduledTask -TaskName "GST Law Document Agent" | Select-Object State
+```
+Windows Task Scheduler doesn't make it obvious a task actually *ran*
+successfully without checking:
+```powershell
 (Get-ScheduledTaskInfo -TaskName "GST Law Document Agent") | Select-Object LastRunTime, LastTaskResult, NextRunTime
 ```
-`LastTaskResult` of `0` means success. Also check `data/logs/cron.log`
+`LastTaskResult` of `0` means success (you'll only see this after the
+scheduled time has actually passed once). Also check `data/logs/cron.log`
 (wrapper script output) and `data/logs/gst_agent.log` (the app's own log)
-for that run's timestamp.
+for that run's timestamp. Remove it with `.\uninstall_scheduler.ps1`.
 
 ### 7. LLM fallback specifically
 
