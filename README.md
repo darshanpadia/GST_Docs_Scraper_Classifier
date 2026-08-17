@@ -4,7 +4,7 @@ An automated agent that discovers, downloads, extracts, classifies, and
 files publicly available Indian GST law documents from official government
 sources, once a day, with a hard cap of 100 new documents per run.
 
-## Getting started (for reviewers): clone to running, every shell
+## Getting started : clone to running, every shell
 
 You don't need any API key to see the core system work — document
 discovery, downloading, OCR, and classification are all rule-based and
@@ -136,6 +136,26 @@ produce identical results from here: downloads in
 Copy `.env.example` to `.env` to change any default (optional — every
 setting has a sensible built-in default; not used by Docker unless you
 also pass `--env-file .env` to `docker run`).
+
+### Step 4 — Set up the daily schedule
+
+Running automatically once every 24 hours is a core requirement of this
+project, not an optional extra — do this regardless of which Path A/B/C
+you set up in Step 2 (the scheduler works with either, see "Running on a
+schedule" for how it picks between them).
+
+**Windows:**
+```powershell
+.\install_scheduler.ps1
+```
+One command, works the same after Docker (Path A), the setup script (Path
+B), or a manual venv (Path C) — see "Running on a schedule" for exactly
+how it picks between a native venv and the Docker image, and how to
+verify a run actually fired.
+
+**Linux/macOS:** add the appropriate `cron` line from "Running on a
+schedule" (native venv or Docker, matching whichever path you set up in
+Step 2) via `crontab -e`.
 
 Next: **"Testing guide"** below has a numbered walkthrough of every way to
 verify it's actually working — starting with the automated test suite (no
@@ -560,24 +580,33 @@ reads/writes the *same* `data/` folder as the native path — running
 native and Docker against the same project directory is expected to (and
 does) produce identical, consistent results.
 
-### 6. The daily schedule (Windows only, optional — not needed to evaluate the core system)
+### 6. The daily schedule — core requirement, not an extra
+
+Running automatically once every 24 hours (Windows Task Scheduler, or
+`cron` on Linux/macOS) is one of this project's core requirements, done in
+Step 4 of "Getting started" — this step is about *verifying* that already-
+registered schedule actually fires and does the right thing, not setting
+it up for the first time.
 
 ```powershell
-.\install_scheduler.ps1                        # one-time setup, registers a daily 10 AM task
+.\install_scheduler.ps1                        # if you haven't already done Step 4
 Get-ScheduledTask -TaskName "GST Law Document Agent" | Select-Object State
 ```
 Works the same regardless of which "Getting started" path you used — it
 auto-detects a native `.venv` and uses it if present, otherwise falls back
-to the built Docker image (see "Running on a schedule" for details).
+to the built Docker image (see "Running on a schedule" for details). To
+confirm it fires without waiting for the scheduled time:
+```powershell
+Start-ScheduledTask -TaskName "GST Law Document Agent"
+```
 
 Windows Task Scheduler doesn't make it obvious a task actually *ran*
 successfully without checking:
 ```powershell
 (Get-ScheduledTaskInfo -TaskName "GST Law Document Agent") | Select-Object LastRunTime, LastTaskResult, NextRunTime
 ```
-`LastTaskResult` of `0` means success (you'll only see this after the
-scheduled time has actually passed once). Also check `data/logs/cron.log`
-(wrapper script output) and `data/logs/gst_agent.log` (the app's own log)
+`LastTaskResult` of `0` means success. Also check `data/logs/cron.log`
+(wrapper script output, timestamped per run) and `data/logs/gst_agent.log` (the app's own log)
 for that run's timestamp. Remove it with `.\uninstall_scheduler.ps1`.
 
 ### 7. LLM fallback specifically
