@@ -16,6 +16,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY gst_agent/ gst_agent/
 
+# tests/ + pyproject.toml so the built image can run its own test suite
+# (`docker run --rm --entrypoint pytest gst-law-docs-agent -q`, see README
+# "Testing guide") -- pytest itself is already installed via
+# requirements.txt, but without these two the container has no tests to
+# discover and silently reports "no tests ran" instead of actually
+# validating anything.
+COPY tests/ tests/
+COPY pyproject.toml .
+
 # Downloaded PDFs, the SQLite state DB, and logs must survive container
 # restarts/recreation -- mount a host directory here, e.g.:
 #   docker run -v "$(pwd)/data:/app/data" gst-law-docs-agent gst_agent.main --once

@@ -6,6 +6,5 @@ __pycache__/
 .git/
 data/
 .env
-tests/
 scripts_dry_run_discovery.py
 README.md
