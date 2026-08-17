@@ -184,8 +184,10 @@ and registering it in `sources/__init__.py` — nothing else changes.
 Packaging/deployment files at the project root: `pyproject.toml` (gives the
 `gst-agent` console command), `setup.sh`/`setup.ps1` (one-shot native
 install), `Dockerfile`/`.dockerignore` (containerized run with Tesseract
-pre-installed). None of them affect `gst_agent/`'s code — all three ways of
-running the project in "Quick start" execute the exact same pipeline.
+pre-installed), `run_scheduled.ps1`/`install_scheduler.ps1`/`uninstall_scheduler.ps1`
+(Windows Task Scheduler, see "Running on a schedule"). None of them affect
+`gst_agent/`'s code — all three ways of running the project in "Quick
+start" execute the exact same pipeline.
 
 ### Data flow per document
 
@@ -304,27 +306,35 @@ folder.
 The documented production path is an OS scheduler invoking `--once` once a
 day; no long-running process is required.
 
-**Windows (Task Scheduler):** use `run_scheduled.ps1` (included at the
-project root) as the task's target rather than pointing Task Scheduler at
-`python.exe` directly. Verified empirically: `data/`, the SQLite DB path,
-etc. resolve correctly regardless of working directory (they're derived
-from this project's own file location) — but **`.env` is only loaded when
-the process's working directory is the project root**, which Task
-Scheduler does not set by default. `run_scheduled.ps1` does `Set-Location`
-to its own folder before running, so this isn't something you need to get
-right by hand.
+**Windows (Task Scheduler):** run `install_scheduler.ps1` once, from
+inside the project folder:
 
 ```powershell
-$scriptPath = "D:\path\to\project\run_scheduled.ps1"
-$action = New-ScheduledTaskAction -Execute "powershell.exe" `
-  -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
-$trigger = New-ScheduledTaskTrigger -Daily -At 10:00AM
-Register-ScheduledTask -TaskName "GST Law Document Agent" -Action $action -Trigger $trigger `
-  -Description "Daily discover/download/classify pass (gst_agent.main --once)."
+.\install_scheduler.ps1                        # daily at 10:00 AM by default
+.\install_scheduler.ps1 -Time "03:00AM"         # or pick your own time
 ```
+A Task Scheduler entry is **not** part of the git repo — cloning this
+project to a new machine or folder does not bring the schedule with it, so
+this is a one-time step anyone running the project needs to do themselves
+(this includes you again, if you ever move or re-clone this folder). The
+script resolves its own location automatically (`$PSScriptRoot`), so it
+always points the task at wherever it's actually being run from — no
+path to edit by hand, and safe to re-run (replaces any existing task of
+the same name rather than erroring or duplicating it).
+
+It targets `run_scheduled.ps1` (also at the project root) rather than
+`python.exe` directly, because of something verified empirically: `data/`,
+the SQLite DB path, etc. resolve correctly regardless of working directory
+(they're derived from this project's own file location) — but **`.env` is
+only loaded when the process's working directory is the project root**,
+which Task Scheduler does not set by default. `run_scheduled.ps1` does
+`Set-Location` to its own folder before running, so this isn't something
+you need to get right by hand either.
+
 Output is appended to `data/logs/cron.log` (in addition to the app's own
-structured `data/logs/gst_agent.log`). To remove it later:
-`Unregister-ScheduledTask -TaskName "GST Law Document Agent" -Confirm:$false`.
+structured `data/logs/gst_agent.log`). Verify it's registered with
+`Get-ScheduledTask -TaskName "GST Law Document Agent" | Select-Object State`,
+and remove it with `.\uninstall_scheduler.ps1`.
 
 **Linux/macOS (cron):**
 
