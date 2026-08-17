@@ -81,8 +81,17 @@ class Settings:
     log_dir: Path = BASE_DIR / "data" / "logs"
 
     # --- run behaviour ---
+    # Used by the CLI (--once) and the OS scheduler (run_scheduled.ps1) --
+    # the real, intended per-run download budget.
     max_new_docs_per_run: int = field(
         default_factory=lambda: _env_int("MAX_NEW_DOCS_PER_RUN", 100)
+    )
+    # Used only by the web UI's "Run now" button (see gst_agent.web.run_now)
+    # -- deliberately much lower than max_new_docs_per_run so clicking it
+    # to check the agent is alive stays fast and doesn't burn through the
+    # day's real download budget or hammer government servers repeatedly.
+    web_ui_max_new_docs_per_run: int = field(
+        default_factory=lambda: _env_int("WEB_UI_MAX_NEW_DOCS_PER_RUN", 2)
     )
 
     # --- politeness / HTTP ---

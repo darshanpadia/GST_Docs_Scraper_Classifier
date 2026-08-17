@@ -40,9 +40,12 @@ def dashboard():
 
 @app.route("/run", methods=["POST"])
 def run_now():
+    # Deliberately capped much lower than the real scheduled run (see
+    # Settings.web_ui_max_new_docs_per_run) -- this button is for "is the
+    # agent alive and working," not for doing the day's real download work.
     with db.open_db(settings.db_path) as conn:
         try:
-            result = pipeline.run_once(conn)
+            result = pipeline.run_once(conn, max_new_docs=settings.web_ui_max_new_docs_per_run)
             flash(
                 f"Run #{result['run_id']} complete: "
                 f"{result['new_documents_downloaded']} new document(s) downloaded.",

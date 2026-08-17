@@ -128,6 +128,23 @@ def test_run_once_stops_at_max_new_docs_per_run(conn, test_settings):
     assert stats["by_status"]["done"] == 2  # ...but only the cap was downloaded and processed
 
 
+def test_run_once_max_new_docs_override_takes_priority_over_settings(conn, test_settings):
+    # test_settings.max_new_docs_per_run is 2 (see fixture) -- passing an
+    # explicit override (as gst_agent.web.run_now does, with a smaller
+    # web-UI-specific cap) must win regardless of what settings says.
+    docs = [_doc(f"https://example.com/{i}.pdf") for i in range(5)]
+    with patch("gst_agent.pipeline.settings", test_settings), \
+         patch("gst_agent.pipeline.get_enabled_sources", return_value=[_FakeSource(docs)]), \
+         patch("gst_agent.pipeline.session.get", side_effect=_get_by_url), \
+         patch("gst_agent.pipeline.extract_text", side_effect=_no_ocr_extraction):
+        result = pipeline.run_once(conn, max_new_docs=1)
+
+    assert result["new_documents_downloaded"] == 1
+    stats = db.get_stats(conn)
+    assert stats["total_documents"] == 5  # discovery is never capped either way
+    assert stats["by_status"]["done"] == 1
+
+
 def test_run_once_does_not_redownload_an_already_done_document(conn, test_settings):
     run_id = db.start_run(conn)
     doc_id = db.insert_discovered(

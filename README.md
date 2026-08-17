@@ -114,6 +114,12 @@ Then open **http://127.0.0.1:5000**.
   category, a "Run now" button (triggers a real pass — confirmed before
   running, since it contacts real government sites), a "Retry failed"
   button, recent run history, and full detail on any failed documents.
+  **"Run now" is deliberately capped much lower than a real scheduled
+  run** (`WEB_UI_MAX_NEW_DOCS_PER_RUN`, default 2, vs `MAX_NEW_DOCS_PER_RUN`,
+  default 100) — it's a "confirm the agent is alive and working" button,
+  not a way to do the day's real download work from the browser. Discovery
+  itself is never capped either way, so clicking it repeatedly still builds
+  up a full backlog for the next real scheduled run to work through.
 - **Documents** — every discovered document, filterable by category and
   status, with a link to the original source URL and an "Open PDF" link
   that serves the actual downloaded file straight from disk.
@@ -363,7 +369,8 @@ Key ones:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MAX_NEW_DOCS_PER_RUN` | `100` | Cap on **new** documents downloaded in a single run |
+| `MAX_NEW_DOCS_PER_RUN` | `100` | Cap on **new** documents per run for the CLI/scheduler (the real budget) |
+| `WEB_UI_MAX_NEW_DOCS_PER_RUN` | `2` | Separate, lower cap only for the web UI's "Run now" button |
 | `ENABLED_SOURCES` | `cbic,gstcouncil` | Comma-separated source modules to run |
 | `ENABLE_LLM_FALLBACK` | `false` | Turn on the LLM classification fallback |
 | `LLM_PROVIDER_ORDER` | `gemini,groq` | Providers tried in order (needs `GEMINI_API_KEY`/`GROQ_API_KEY`) |

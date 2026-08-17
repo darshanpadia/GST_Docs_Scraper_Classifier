@@ -212,7 +212,18 @@ def _promote_recurring_categories(conn: sqlite3.Connection) -> None:
                 )
 
 
-def run_once(conn: sqlite3.Connection) -> dict:
+def run_once(conn: sqlite3.Connection, *, max_new_docs: int | None = None) -> dict:
+    """max_new_docs overrides settings.max_new_docs_per_run for this call
+    only -- used by the web UI's "Run now" button to cap a manually
+    triggered run much lower (see Settings.web_ui_max_new_docs_per_run)
+    than the real scheduled run, so clicking it repeatedly stays fast and
+    doesn't burn through the day's intended download budget. Discovery
+    itself is never capped either way -- it's cheap (just DB rows), and a
+    larger backlog only means future runs (scheduled or manual) have more
+    to work through, never a problem to leave discovered."""
+    if max_new_docs is None:
+        max_new_docs = settings.max_new_docs_per_run
+
     run_id = db.start_run(conn)
     new_downloaded = 0
     try:
@@ -224,10 +235,10 @@ def run_once(conn: sqlite3.Connection) -> dict:
         # hit the cap before reaching it belongs in this run's queue too.
         pending = db.get_pending_documents(conn)
         for row in pending:
-            if new_downloaded >= settings.max_new_docs_per_run:
+            if new_downloaded >= max_new_docs:
                 logger.info(
-                    "Reached max_new_docs_per_run (%d) -- stopping downloads for this run",
-                    settings.max_new_docs_per_run,
+                    "Reached max_new_docs (%d) -- stopping downloads for this run",
+                    max_new_docs,
                 )
                 break
 

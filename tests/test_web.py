@@ -12,6 +12,7 @@ import pytest
 from gst_agent import db
 from gst_agent import web as web_module
 from gst_agent.config import settings as real_settings
+from gst_agent.models import DiscoveredDoc
 
 
 @pytest.fixture
@@ -77,6 +78,55 @@ def test_run_now_triggers_pipeline_and_redirects(client):
     assert response.status_code == 200
     assert b"Run #" in response.data
     assert b"complete" in response.data
+
+
+class _FakeSource:
+    name = "fake"
+
+    def __init__(self, docs):
+        self._docs = docs
+
+    def discover(self):
+        return self._docs
+
+
+class _FakeResponse:
+    def __init__(self, content: bytes):
+        self.content = content
+
+
+def test_run_now_uses_the_web_ui_cap_not_the_real_scheduled_cap(client, test_settings):
+    # A real scheduled run would use max_new_docs_per_run (set high here, as
+    # it is in production); the button must still only download
+    # web_ui_max_new_docs_per_run of them -- proving gst_agent.web.run_now
+    # actually passes its own override rather than falling through to the
+    # much larger default.
+    docs = [
+        DiscoveredDoc(
+            source="fake", source_page="https://example.com", doc_url=f"https://example.com/{i}.pdf",
+            title=f"doc {i}", doc_number=None, doc_date=None, source_hint_category="Circular",
+        )
+        for i in range(5)
+    ]
+    capped_settings = dataclasses.replace(
+        test_settings, max_new_docs_per_run=100, web_ui_max_new_docs_per_run=2
+    )
+
+    with patch("gst_agent.web.settings", capped_settings), \
+         patch("gst_agent.pipeline.settings", capped_settings), \
+         patch("gst_agent.pipeline.get_enabled_sources", return_value=[_FakeSource(docs)]), \
+         patch("gst_agent.pipeline.session.get", side_effect=lambda url, **kw: _FakeResponse(url.encode())), \
+         patch("gst_agent.pipeline.extract_text") as mock_extract:
+        from gst_agent.extractor import ExtractionResult
+        mock_extract.return_value = ExtractionResult(text="irrelevant", ocr_used=False, page_count=1)
+        response = client.post("/run", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert b"2 new document(s) downloaded" in response.data
+    with db.open_db(capped_settings.db_path) as conn:
+        stats = db.get_stats(conn)
+    assert stats["total_documents"] == 5  # discovery is never capped
+    assert stats["by_status"]["done"] == 2  # but only the web-UI cap was downloaded
 
 
 def test_run_now_failure_is_shown_as_flash_not_a_500(client):
