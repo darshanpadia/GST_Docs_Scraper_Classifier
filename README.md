@@ -482,6 +482,10 @@ is expected to (and does) produce identical, consistent results.
 .\install_scheduler.ps1                        # one-time setup, registers a daily 10 AM task
 Get-ScheduledTask -TaskName "GST Law Document Agent" | Select-Object State
 ```
+Works the same regardless of which "Quick start" path you used — it
+auto-detects a native `.venv` and uses it if present, otherwise falls back
+to the built Docker image (see "Running on a schedule" for details).
+
 Windows Task Scheduler doesn't make it obvious a task actually *ran*
 successfully without checking:
 ```powershell
