@@ -398,7 +398,20 @@ day; no long-running process is required.
 ```powershell
 .\install_scheduler.ps1                        # daily at 10:00 AM by default
 .\install_scheduler.ps1 -Time "03:00AM"         # or pick your own time
+.\install_scheduler.ps1 -ShowWindow             # visible console window (see tradeoff below)
 ```
+
+**Watching a run happen.** By default the task runs in the background with
+no visible window — that's precisely *why* it fires reliably when the
+machine is locked or you're logged out. Nothing is lost: every run is
+fully captured in `data/logs/cron.log`. To watch one live:
+```powershell
+Get-Content data\logs\cron.log -Wait -Tail 20
+```
+If you specifically want a console window to pop up, `-ShowWindow`
+registers the task as `Interactive` instead — but that mode **only fires
+while you're logged in with an unlocked session**, so use it for demos and
+switch back (re-run without the switch) for the real unattended schedule.
 
 **Must be elevated, and here's the real bug that requirement fixes:**
 `Register-ScheduledTask` without an explicit principal defaults to
