@@ -144,7 +144,11 @@ project, not an optional extra — do this regardless of which Path A/B/C
 you set up in Step 2 (the scheduler works with either, see "Running on a
 schedule" for how it picks between them).
 
-**Windows:**
+**Windows:** run this from an **elevated (Administrator) PowerShell** —
+right-click PowerShell, "Run as administrator" — the script checks this
+itself and refuses with a clear message otherwise. Elevation is only
+needed to *register* the task; the task itself then runs at standard
+rights, not elevated.
 ```powershell
 .\install_scheduler.ps1                        # daily at 10:00 AM by default
 .\install_scheduler.ps1 -Time "03:00AM"         # or pick your own time
@@ -388,13 +392,32 @@ folder.
 The documented production path is an OS scheduler invoking `--once` once a
 day; no long-running process is required.
 
-**Windows (Task Scheduler):** run `install_scheduler.ps1` once, from
-inside the project folder:
+**Windows (Task Scheduler):** run `install_scheduler.ps1` once, from an
+**elevated (Administrator) PowerShell**, inside the project folder:
 
 ```powershell
 .\install_scheduler.ps1                        # daily at 10:00 AM by default
 .\install_scheduler.ps1 -Time "03:00AM"         # or pick your own time
 ```
+
+**Must be elevated, and here's the real bug that requirement fixes:**
+`Register-ScheduledTask` without an explicit principal defaults to
+`LogonType=Interactive`, which only fires the task if you're actively
+logged into an unlocked session at the exact trigger moment — locked,
+asleep, or logged out at 10 AM, and Task Scheduler silently skips the run
+with no error and no retry. Discovered this exact way: a task that showed
+`State: Ready` for days, that had genuinely never executed even once
+(`Get-ScheduledTaskInfo` showed `LastTaskResult 267011`, Windows' code for
+"has not run"). Fixed by registering with `LogonType S4U` instead, which
+runs the task under your account in the background regardless of session
+state, with no password to store — but configuring S4U itself needs local
+admin rights, even though the task then runs at standard rights afterward
+(`RunLevel Limited`), never elevated. The script checks elevation itself
+and refuses early with a clear message if you're not admin, rather than
+the silent partial failure that shipped before this was caught: an
+unprivileged run used to throw "Access is denied" on registration but
+kept going anyway and printed a false "Registered..." success message.
+
 A Task Scheduler entry is **not** part of the git repo — cloning this
 project to a new machine or folder does not bring the schedule with it, so
 this is a one-time step anyone running the project needs to do themselves
