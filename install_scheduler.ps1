@@ -44,7 +44,17 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
 $action = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
 $trigger = New-ScheduledTaskTrigger -Daily -At $Time
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd
+
+# AllowStartIfOnBatteries / DontStopIfGoingOnBatteries explicitly -- without
+# them, New-ScheduledTaskSettingsSet defaults to DisallowStartIfOnBatteries
+# = True and StopIfGoingOnBatteries = True. On a laptop not plugged into AC
+# at the trigger moment, Task Scheduler silently refuses to start the task
+# at all -- same class of silent skip as the LogonType issue below, just a
+# second, independent cause of the same "gets scheduled but never
+# executes" symptom. This is a lightweight scraping task; there's no
+# reason to gate it on AC power.
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
 # Explicit principal, LogonType S4U specifically -- Register-ScheduledTask's
 # default (no -Principal at all) creates a task with LogonType=Interactive,
