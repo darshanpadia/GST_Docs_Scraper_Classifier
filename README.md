@@ -146,7 +146,8 @@ schedule" for how it picks between them).
 
 **Windows:**
 ```powershell
-.\install_scheduler.ps1
+.\install_scheduler.ps1                        # daily at 10:00 AM by default
+.\install_scheduler.ps1 -Time "03:00AM"         # or pick your own time
 ```
 One command, works the same after Docker (Path A), the setup script (Path
 B), or a manual venv (Path C) — see "Running on a schedule" for exactly
